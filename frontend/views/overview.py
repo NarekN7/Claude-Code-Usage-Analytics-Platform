@@ -32,12 +32,27 @@ def render() -> None:
         st.caption(str(exc))
         return
 
+    af = data.get("filters") or {}
+    if any(
+        af.get(k) is not None
+        for k in ("date_from", "date_to", "practice", "location")
+    ):
+        st.caption(
+            f"**Filtered by:** `date_from={af.get('date_from')}` · `date_to={af.get('date_to')}` · "
+            f"`practice={af.get('practice')}` · `location={af.get('location')}`"
+        )
+
     totals = data.get("totals") or {}
+
+    def _n(key: str) -> int:
+        v = totals.get(key)
+        return int(v) if v is not None else 0
+
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Distinct users", f"{totals.get('total_users', 0):,}")
-    c2.metric("Sessions (events)", f"{totals.get('total_sessions', 0):,}")
-    c3.metric("Events", f"{totals.get('total_events', 0):,}")
-    c4.metric("Total tokens", f"{totals.get('total_tokens', 0):,}")
+    c1.metric("Distinct users", f"{_n('total_users'):,}")
+    c2.metric("Sessions (events)", f"{_n('total_sessions'):,}")
+    c3.metric("Events", f"{_n('total_events'):,}")
+    c4.metric("Total tokens", f"{_n('total_tokens'):,}")
 
     st.subheader("Token usage over time (daily)")
     by_day = data.get("usage_by_day") or []

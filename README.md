@@ -133,6 +133,36 @@ python -m scripts.etl.run_pipeline
 
 Options: `--employees PATH`, `--jsonl PATH`, `--skip-employees`, `--skip-events`, `--skip-sessions`.
 
+## Testing
+
+Install dev dependencies and run the suite (unit tests + mocked gateway; **no PostgreSQL** required for the default run):
+
+```bash
+pip install -r requirements-dev.txt
+export PYTHONPATH=$(pwd)
+pytest tests -v
+```
+
+- **Fast only** (skip DB integration): `pytest tests -v -m "not integration"`
+- **PostgreSQL integration** (`tests/test_integration_postgres.py`): start Postgres, set `DATABASE_URL` or `TEST_DATABASE_URL`, then run `pytest tests/test_integration_postgres.py -v` or full `pytest tests -v`.
+
+Example with Docker Compose:
+
+```bash
+docker compose up -d postgres
+export DATABASE_URL=postgresql+psycopg2://analytics:analytics@127.0.0.1:5432/analytics
+pytest tests/test_integration_postgres.py -v
+```
+
+What is covered:
+
+| Area | Tests |
+|------|--------|
+| ETL parse / Pydantic | `test_parse.py`, `test_schemas.py` |
+| `/health` | `test_health_endpoints.py` (analytics, ingestion) |
+| Gateway → downstream | `test_gateway_respx.py` (mocked `httpx`: `/health`, `/metrics`, `/users`, `/sessions`, `/events/summary`, ingest, process) |
+| DB + APIs | `test_integration_postgres.py` (requires live Postgres: metrics, users/sessions/summary, sessionization, CSV + JSONL ingest) |
+
 ## API (via gateway)
 
 | Method | Path | Description |
