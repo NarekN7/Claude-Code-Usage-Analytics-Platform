@@ -950,6 +950,12 @@ Return:
 
 ---
 
+## Future improvements
+
+A natural next step is **streaming ingestion** on **AWS** (for example **Kinesis**, **MSK**, or **Lambda**-driven consumers feeding a warehouse or lake). That would replace large batch JSONL uploads with continuous pipelines, improve **elasticity** under growing event volume, and align with **horizontal scaling** patterns—while keeping the same domain model (events → sessions → analytics) this project already uses.
+
+---
+
 ## Git workflow (optional)
 
 Short-lived feature branches, merge to `main` after checks; keep commits small and traceable.
