@@ -2,7 +2,7 @@
 
 End-to-end analytics for Claude Code–style telemetry: **PostgreSQL** warehouse, **ETL** from JSONL/CSV, **FastAPI** microservices (gateway, ingestion, analytics), and a **Streamlit + Plotly** dashboard. The UI talks only to the **gateway** over HTTP; it never connects to the database directly.
 
-**Run the app:** [From clone to Streamlit (Docker)](#from-clone-to-streamlit-docker) · **Verify it:** [How to test that everything works](#how-to-test-that-everything-works)
+**Run the app:** [From clone to Streamlit (Docker)](#from-clone-to-streamlit-docker) · **Verify it:** [How to test that everything works](#how-to-test-that-everything-works) · **LLM usage:** [LLM usage log](#llm-usage-log)
 
 ---
 
@@ -417,6 +417,494 @@ After **Steps 2–4** in [From clone to Streamlit (Docker)](#from-clone-to-strea
 | Optional | `curl -s "http://localhost:8000/users?limit=3"` and similar for `/sessions`, `/events/summary`. |
 
 If any step fails, follow **Step 6** in the same section (re-run `seed`) and inspect `docker compose logs` for `gateway`, `ingestion`, `analytics`, `seed`, `dashboard`.
+
+---
+
+## LLM usage log
+
+This section documents how **generative AI** was used to build and refine this project, per the assignment deliverables: **which tools**, **representative prompts**, and **how outputs were validated**.
+
+### Tools and workflow
+
+| Tool / mode | How it was used |
+|-------------|------------------|
+| **Cursor — Planning / Agent mode** | **Primary driver** for structuring the work: breaking the assignment into layers (database, ETL, APIs, gateway, Streamlit, Docker), sequencing tasks, and keeping the codebase aligned with a consistent architecture. Used heavily for scaffolding, refactors, and cross-cutting fixes (e.g. ingestion, analytics, dashboard wiring). |
+| **Chat-style assistance** | Ad-hoc questions, debugging, README and documentation drafting, and clarifying behavior of libraries (Streamlit, FastAPI, SQLAlchemy). |
+| *(add others if applicable: e.g. Claude web, Copilot, …)* | *(short note)* |
+
+The **planning-oriented agent workflow** was the main lever to **structure the project end-to-end** (what to build first, how services talk, and where code should live) rather than only one-off completions.
+
+### Example prompts
+
+Three representative prompts below cover **initial architecture**, **synthetic data verification**, and **pipeline debugging**. The first prompt suggested a generic `src/` / `app/` layout; the implemented repository uses `backend/`, `frontend/`, `scripts/`, and `db/` instead (see [Architecture](#architecture)).
+
+#### Prompt 1 — “Initial architecture / plan”
+
+```
+You are a senior data engineer and full-stack developer.
+
+Your task is to build a complete end-to-end analytics platform called:
+
+"Claude Code Usage Analytics Platform"
+
+Follow these requirements strictly and generate production-quality code with clean architecture.
+
+
+====================================================
+1. OVERVIEW
+====================================================
+
+We have synthetic telemetry data generated from a script:
+- telemetry_logs.jsonl
+- employees.csv
+
+The goal is to:
+- ingest and process telemetry data
+- store it in PostgreSQL
+- build analytics queries
+- expose results in a Streamlit dashboard
+- optionally expose API endpoints (FastAPI)
+
+Use Docker Compose for orchestration.
+
+====================================================
+2. TECH STACK (MANDATORY)
+====================================================
+
+- Python 3.11
+- PostgreSQL
+- Docker Compose
+- SQLAlchemy (preferred) or psycopg2
+- Pandas for ETL
+- Streamlit for dashboard
+- Plotly for charts
+- FastAPI (bonus API)
+
+====================================================
+3. PROJECT STRUCTURE (STRICT)
+====================================================
+
+Create this structure:
+
+project/
+├── data/
+│   └── raw/
+├── src/
+│   ├── ingestion/
+│   ├── processing/
+│   ├── db/
+│   ├── analytics/
+│   ├── api/
+├── app/
+│   └── streamlit_app.py
+├── docker-compose.yml
+├── Dockerfile
+├── requirements.txt
+├── README.md
+
+====================================================
+4. DATABASE DESIGN
+====================================================
+
+Create PostgreSQL tables:
+
+1. employees
+- email (PK)
+- full_name
+- practice
+- level
+- location
+
+2. events
+- event_id (PK)
+- timestamp
+- event_type
+- session_id
+- user_email
+- model
+- input_tokens
+- output_tokens
+- total_tokens
+- attributes (JSON)
+- scope (JSON)
+- resource (JSON)
+
+3. sessions (derived)
+- session_id (PK)
+- user_email
+- session_start
+- session_end
+- duration_minutes
+- event_count
+- total_input_tokens
+- total_output_tokens
+- total_tokens
+- model
+
+====================================================
+5. DATA INGESTION (VERY IMPORTANT)
+====================================================
+
+Implement ETL pipeline:
+
+- Read employees.csv into employees table
+- Read telemetry_logs.jsonl line-by-line
+
+Each JSON line contains:
+{
+  "logEvents": [
+    {
+      "message": "{...JSON STRING...}"
+    }
+  ]
+}
+
+For each logEvent:
+- parse message JSON string
+- extract:
+  - body → event_type
+  - attributes
+  - scope
+  - resource
+
+Flatten into rows and insert into events table.
+
+Handle:
+- invalid JSON safely
+- missing fields
+- type conversions
+
+====================================================
+6. SESSIONIZATION
+====================================================
+
+Create logic to aggregate events into sessions:
+
+Group by session_id:
+- min(timestamp) → session_start
+- max(timestamp) → session_end
+- duration
+- event_count
+- sum tokens
+
+Insert into sessions table.
+
+====================================================
+7. ANALYTICS LAYER
+====================================================
+
+Implement queries/functions:
+
+- total users, sessions, events, tokens
+- token usage by practice / level / location
+- model usage distribution
+- event type distribution
+- usage by hour/day
+- top users by tokens
+- session duration distribution
+
+====================================================
+8. STREAMLIT DASHBOARD
+====================================================
+
+Create app with 4 pages:
+
+1. Overview
+- KPIs
+- trends
+
+2. User Analytics
+- usage by practice/level/location
+- top users
+
+3. Session Analytics
+- session duration
+- sessions over time
+
+4. Event Analytics
+- event types
+- model usage
+
+Include:
+- filters (date, practice, location)
+- Plotly charts
+
+====================================================
+9. DOCKER SETUP
+====================================================
+
+Create docker-compose.yml with:
+
+- postgres
+- pgadmin
+- streamlit app
+
+Ensure:
+- proper ports
+- volumes
+- environment variables
+
+Also create Dockerfile for Python app.
+
+====================================================
+10. API (BONUS)
+====================================================
+
+Create FastAPI service with endpoints:
+
+- /metrics
+- /users
+- /sessions
+
+====================================================
+11. CODE QUALITY
+====================================================
+
+- modular code
+- clear functions
+- comments where needed
+- no hardcoding paths
+- use environment variables
+
+====================================================
+12. README
+====================================================
+
+Generate a professional README including:
+- architecture
+- setup steps
+- data generation command
+- how to run docker
+- how to run pipeline
+- dashboard access URLs
+
+====================================================
+13. IMPORTANT
+====================================================
+
+- PostgreSQL as analytical source
+- Docker Compose as execution standard
+- Streaming-ready incremental ingestion design
+- Strict frontend-backend-database separation
+- API-driven loosely coupled architecture
+- Microservice architecture is required: gateway, ingestion, analytics, and dashboard services must be independently implemented and orchestrated via Docker Compose. Services must communicate only through well-defined APIs. Ingestion must support batch APIs (JSON/CSV) and be designed for future streaming. Events must be normalized into a canonical relational model with Pydantic-based validation. Analytics must cover executive, time-based, role-based, behavioral, and operational insights.
+
+- Make code runnable
+- Do NOT skip implementation details
+- Prefer clarity over complexity
+- Use best practices
+- Assume real-world usage
+- Follow the CODING_GUIDELINES.md
+
+====================================================
+14. GIT STRATEGY & WORKFLOW DISCIPLINE
+====================================================
+
+- Branch-per-epoch development model
+- Feature branches per implementation phase
+- Commit history must reflect incremental evolution
+- Merge to main only after validation
+- Maintain a clear, traceable development timeline
+
+
+====================================================
+15. ONE OBSERVATION FROM DATA
+====================================================
+
+{
+  "batch_envelope": {
+    "messageType": "DATA_MESSAGE",
+    "owner": "123456789012",
+    "logGroup": "/claude-code/telemetry",
+    "logStream": "otel-collector",
+    "subscriptionFilters": [
+      "logs-to-s3"
+    ],
+    "year": 2025,
+    "month": 12,
+    "day": 3
+  },
+  "log_event": {
+    "id": "657689771374632572378173045471188406392782962573476446469",
+    "timestamp": 1764720360000,
+    "message_parsed": {
+      "body": "claude_code.user_prompt",
+      "attributes": {
+        "event.timestamp": "2025-12-03T00:06:00.000Z",
+        "organization.id": "27d80e08-3d7f-4b6a-a457-5cc58629ce8b",
+        "session.id": "678c4a9e-4362-404e-89c7-1c8abb91226c",
+        "terminal.type": "vscode",
+        "user.account_uuid": "f0af77a2-8307-4b95-b5f9-e99f6ce34b26",
+        "user.email": "blake.patel@example.com",
+        "user.id": "4ba41b6cc8bf83a2096c4bcd7c735f5dc746824a6153f5e0f9b359f3ee50b7a7",
+        "event.name": "user_prompt",
+        "prompt": "<REDACTED>",
+        "prompt_length": "420"
+      },
+      "scope": {
+        "name": "com.anthropic.claude_code.events",
+        "version": "2.1.45"
+      },
+      "resource": {
+        "host.arch": "x86_64",
+        "host.name": "Blakes-MacBook-Pro.local",
+        "os.type": "linux",
+        "os.version": "6.1.0",
+        "service.name": "claude-code-None",
+        "service.version": "2.1.45",
+        "user.email": "",
+        "user.practice": "Frontend Engineering",
+        "user.profile": "patel",
+        "user.serial": "WN2Y8FV2BC"
+      }
+    }
+  }
+}
+
+====================================================
+OUTPUT FORMAT
+====================================================
+
+Generate:
+- all files
+- full code
+- docker config
+- ETL scripts
+- dashboard
+- API
+
+Everything should be ready to run.
+```
+
+#### Prompt 2 — *Data generation and verification*
+
+```
+Please follow these steps carefully and provide clear, structured output.
+
+1. Review the project documentation located at:
+   claude_code_telemetry2/README.md (from the repository root)
+
+   The README contains instructions for generating synthetic telemetry data using the script:
+   generate_fake_data.py
+
+2. Execute the data generation script using the recommended parameters:
+   --num-users 100
+   --num-sessions 5000
+   --days 60
+
+   Ensure the data is successfully generated before proceeding.
+
+3. After generation, load the produced dataset and extract a single complete record.
+
+4. Present the record in a clean, human-readable, fully formatted JSON structure:
+   - Do NOT redact or replace any fields with placeholders
+   - Preserve all nested structure and attributes exactly as generated
+   - Format the output for readability (proper indentation, key ordering if applicable)
+
+5. The goal is to inspect and understand the schema and structure of the telemetry events, so ensure the output is accurate and complete.
+
+Return only:
+- Confirmation that data generation succeeded
+- One fully formatted example record
+```
+
+*For comparison: [From clone to Streamlit](#from-clone-to-streamlit-docker) uses `--num-sessions 2000` for a quicker first run; this prompt used `--num-sessions 5000` for a larger verification sample.*
+
+#### Prompt 3 — *Example of Debugging the error cause*
+
+```
+We are observing a critical data inconsistency in the analytics dashboard.
+
+Current state:
+- Distinct users: 1
+- Sessions: 1
+- Events: 1
+- Total tokens: 0
+
+This indicates a systemic issue in the data pipeline rather than a UI problem.
+
+====================================================
+OBJECTIVE
+====================================================
+
+Identify and permanently resolve the root cause across the full data flow:
+
+ingestion → normalization → persistence → analytics → API → dashboard
+
+The fix must address the underlying issue, not just patch symptoms.
+
+====================================================
+INVESTIGATION REQUIREMENTS
+====================================================
+
+Perform a structured, end-to-end validation of the pipeline:
+
+1. Data Generation
+   - Verify that synthetic data contains diverse users, sessions, and token values
+   - Confirm that generated records are non-trivial and correctly distributed
+
+2. Ingestion Layer
+   - Ensure all records are being read (not overwritten or truncated)
+   - Validate parsing logic for nested JSON (logEvents.message)
+   - Confirm batch ingestion processes all events, not just one
+
+3. Normalization & Validation
+   - Check field extraction (user_email, session_id, tokens, timestamps)
+   - Verify type conversions (strings → numeric fields)
+   - Ensure no silent failures or dropped records
+   - Validate Pydantic schemas are correctly applied
+
+4. Database Layer (PostgreSQL)
+   - Inspect raw and normalized tables
+   - Confirm row counts match expected ingestion volume
+   - Validate token fields are populated and not defaulting to zero
+   - Check for accidental overwrites or primary key collisions
+
+5. Analytics Layer
+   - Validate aggregation queries (GROUP BY, SUM, COUNT)
+   - Ensure filters and joins are correct
+   - Confirm queries return realistic distributions
+
+6. API Layer (Gateway → Analytics Service)
+   - Verify endpoints return correct aggregated data
+   - Inspect responses for incorrect defaults or truncation
+
+7. Dashboard Layer
+   - Confirm API responses are rendered correctly
+   - Ensure no client-side filtering reduces dataset unintentionally
+
+====================================================
+EXPECTED OUTCOME
+====================================================
+
+- Correct counts for users, sessions, and events
+- Non-zero and realistic token values
+- Proper distributions across time, roles, and sessions
+- Dashboard reflecting actual underlying data
+
+====================================================
+IMPORTANT
+====================================================
+
+- Do not apply superficial fixes at the UI layer
+- Root cause must be identified and resolved at the correct layer
+- Add logging and validation checks where needed
+- Ensure the fix is robust and prevents regression
+
+Return:
+- Root cause analysis
+- Specific fixes applied
+- Verification results after correction
+```
+
+### How AI-generated output was validated
+
+| Validation | What we did |
+|------------|-------------|
+| **Automated tests** | `pytest` (unit + mocked gateway; optional PostgreSQL integration). See [How to test that everything works](#how-to-test-that-everything-works). |
+| **Manual / smoke** | Docker Compose stack, health endpoints, `/metrics`, and Streamlit UI checks documented in the same testing section. |
+| **Code review** | Human review of diffs before merge; alignment with [CODING_GUIDELINES.md](CODING_GUIDELINES.md). |
+| **Iterative fixes** | When behavior was wrong (e.g. empty KPIs, session rebuild), we reproduced the issue, adjusted prompts or code, and re-ran tests and containers until checks passed. |
 
 ---
 
