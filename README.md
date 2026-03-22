@@ -956,12 +956,6 @@ A natural next step is **streaming ingestion** on **AWS** (for example **Kinesis
 
 ---
 
-## Git workflow (optional)
-
-Short-lived feature branches, merge to `main` after checks; keep commits small and traceable.
-
----
-
 ## Coding standards
 
 See [CODING_GUIDELINES.md](CODING_GUIDELINES.md).
