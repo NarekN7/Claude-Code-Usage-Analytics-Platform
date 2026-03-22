@@ -1,3 +1,19 @@
 .DS_Store
 **/.DS_Store
 .Rhistory
+.env
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
+dist/
+build/
+
+# Generated sample outputs (regenerate with claude_code_telemetry2/generate_fake_data.py)
+claude_code_telemetry2/output/
+data/raw/*.jsonl
+data/raw/*.csv
+

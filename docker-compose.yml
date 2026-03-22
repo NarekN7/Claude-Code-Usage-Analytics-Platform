@@ -1,0 +1,118 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: analytics
+      POSTGRES_PASSWORD: analytics
+      POSTGRES_DB: analytics
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U analytics -d analytics"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pgadmin:
+    image: dpage/pgadmin4:8
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+    ports:
+      - "5050:80"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  ingestion:
+    build: .
+    command: >
+      sh -c "alembic upgrade head &&
+      uvicorn backend.ingestion.main:app --host 0.0.0.0 --port 8001"
+    environment:
+      DATABASE_URL: postgresql+psycopg2://analytics:analytics@postgres:5432/analytics
+      DATA_RAW_DIR: /app/data/raw
+    volumes:
+      - ./data/raw:/app/data/raw
+    ports:
+      - "8001:8001"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health')",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  seed:
+    build: .
+    command: python scripts/seed_database.py
+    environment:
+      DATABASE_URL: postgresql+psycopg2://analytics:analytics@postgres:5432/analytics
+      DATA_RAW_DIR: /app/data/raw
+      INGESTION_URL: http://ingestion:8001
+    volumes:
+      - ./data/raw:/app/data/raw
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ingestion:
+        condition: service_healthy
+    restart: "no"
+
+  analytics:
+    build: .
+    command: >
+      sh -c "alembic upgrade head &&
+      uvicorn backend.analytics.main:app --host 0.0.0.0 --port 8002"
+    environment:
+      DATABASE_URL: postgresql+psycopg2://analytics:analytics@postgres:5432/analytics
+    ports:
+      - "8002:8002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  gateway:
+    build: .
+    command: uvicorn backend.gateway.main:app --host 0.0.0.0 --port 8000
+    environment:
+      INGESTION_BASE_URL: http://ingestion:8001
+      ANALYTICS_BASE_URL: http://analytics:8002
+      PUBLIC_GATEWAY_URL: http://gateway:8000
+    ports:
+      - "8000:8000"
+    depends_on:
+      - ingestion
+      - analytics
+
+  dashboard:
+    build: .
+    command: >
+      streamlit run frontend/streamlit_app.py
+      --server.address=0.0.0.0
+      --server.port=8501
+      --browser.gatherUsageStats=false
+    environment:
+      PUBLIC_GATEWAY_URL: http://gateway:8000
+    ports:
+      - "8501:8501"
+    depends_on:
+      gateway:
+        condition: service_started
+      seed:
+        condition: service_completed_successfully
+
+volumes:
+  pgdata:
