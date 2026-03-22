@@ -87,7 +87,11 @@ docker compose up --build
 | PostgreSQL | localhost:5432 (`analytics` / `analytics`) |
 | pgAdmin | http://localhost:5050 (see compose env for default email/password) |
 
-After containers are up, load data (from your host, with files under `./data/raw`):
+**Automatic load (recommended):** place `employees.csv` and `telemetry_logs.jsonl` under `./data/raw/` before starting Compose. The one-shot **`seed`** service waits for ingestion, then loads employees + telemetry (path ingest) + session rebuild when the database is empty or has too few events while a large JSONL file is mounted (it repairs “stale” dev DBs). **Streamlit** starts only after `seed` exits successfully.
+
+If `data/raw/` is missing those files, seed skips and the warehouse stays empty until you load manually:
+
+After containers are up, you can load data manually (from your host, with files under `./data/raw`):
 
 ```bash
 curl -s -X POST "http://localhost:8001/ingest/employees/csv" -F "file=@data/raw/employees.csv"

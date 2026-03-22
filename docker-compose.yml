@@ -39,9 +39,37 @@ services:
       - ./data/raw:/app/data/raw
     ports:
       - "8001:8001"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health')",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
     depends_on:
       postgres:
         condition: service_healthy
+
+  seed:
+    build: .
+    command: python scripts/seed_database.py
+    environment:
+      DATABASE_URL: postgresql+psycopg2://analytics:analytics@postgres:5432/analytics
+      DATA_RAW_DIR: /app/data/raw
+      INGESTION_URL: http://ingestion:8001
+    volumes:
+      - ./data/raw:/app/data/raw
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ingestion:
+        condition: service_healthy
+    restart: "no"
 
   analytics:
     build: .
@@ -81,7 +109,10 @@ services:
     ports:
       - "8501:8501"
     depends_on:
-      - gateway
+      gateway:
+        condition: service_started
+      seed:
+        condition: service_completed_successfully
 
 volumes:
   pgdata:
