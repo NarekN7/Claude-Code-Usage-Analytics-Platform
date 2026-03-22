@@ -438,6 +438,8 @@ The **planning-oriented agent workflow** was the main lever to **structure the p
 
 Three representative prompts below cover **initial architecture**, **synthetic data verification**, and **pipeline debugging**. The first prompt suggested a generic `src/` / `app/` layout; the implemented repository uses `backend/`, `frontend/`, `scripts/`, and `db/` instead (see [Architecture](#architecture)).
 
+**Prompt 1** was driven through **Cursor Plan mode** (plan-first, then execute). For long, multi-layer work—schema, ETL, APIs, Docker, and UI in one arc—that mode is what made the effort tractable: it keeps scope, sequencing, and dependencies explicit instead of scattering one-off edits across a large surface.
+
 #### Prompt 1 — “Initial architecture / plan”
 
 ```
