@@ -2,7 +2,7 @@
 
 End-to-end analytics for Claude Code–style telemetry: **PostgreSQL** warehouse, **ETL** from JSONL/CSV, **FastAPI** microservices (gateway, ingestion, analytics), and a **Streamlit + Plotly** dashboard. The UI talks only to the **gateway** over HTTP; it never connects to the database directly.
 
-**Run the app:** [From clone to Streamlit (Docker)](#from-clone-to-streamlit-docker) · **Verify it:** [How to test that everything works](#how-to-test-that-everything-works) · **LLM usage:** [LLM usage log](#llm-usage-log)
+**Run the app:** [From clone to Streamlit (Docker)](#from-clone-to-streamlit-docker) · **Verify it:** [How to test that everything works](#how-to-test-that-everything-works) · **Dependencies:** [Python dependencies](#dependencies) · **LLM usage:** [LLM usage log](#llm-usage-log)
 
 ---
 
@@ -29,6 +29,46 @@ End-to-end analytics for Claude Code–style telemetry: **PostgreSQL** warehouse
 | **Python 3.11+** | Only for **generating** sample `employees.csv` + `telemetry_logs.jsonl` on your machine (Step 2 below). Docker images use Python 3.11 internally. |
 
 No Docker? See [Run without Docker (advanced)](#run-without-docker-advanced).
+
+---
+
+## Dependencies
+
+Python dependencies are pinned in **`requirements.txt`** (runtime) and **`requirements-dev.txt`** (includes `-r requirements.txt` plus test tools). Docker images install from `requirements.txt` during the image build. For local runs without Docker, use `pip install -r requirements.txt` (see [Run without Docker (advanced)](#run-without-docker-advanced)); for tests, use `pip install -r requirements-dev.txt` (see [How to test that everything works](#how-to-test-that-everything-works)).
+
+### Runtime (`requirements.txt`)
+
+| Package | Version (constraint) | Role |
+|---------|----------------------|------|
+| **SQLAlchemy** | `>=2.0,<3` | ORM, database access |
+| **psycopg2-binary** | `>=2.9,<3` | PostgreSQL driver |
+| **pandas** | `>=2,<3` | ETL / tabular processing |
+| **pydantic** | `>=2,<3` | Schemas and validation |
+| **pydantic-settings** | `>=2,<3` | Settings from environment |
+| **FastAPI** | `>=0.115,<1` | HTTP APIs (gateway, ingestion, analytics) |
+| **uvicorn** `[standard]` | `>=0.32,<1` | ASGI server |
+| **httpx** | `>=0.27,<1` | HTTP client (e.g. gateway → backends) |
+| **Streamlit** | `>=1.40,<2` | Dashboard |
+| **Plotly** | `>=5,<6` | Charts in Streamlit |
+| **python-multipart** | `>=0.0.9,<1` | Multipart uploads (CSV / JSONL) |
+| **Alembic** | `>=1.14,<2` | Database migrations |
+
+### Development / test (`requirements-dev.txt`)
+
+These are added on top of `requirements.txt`:
+
+| Package | Version (constraint) | Role |
+|---------|----------------------|------|
+| **pytest** | `>=8,<9` | Test runner |
+| **pytest-asyncio** | `>=0.24,<1` | Async tests |
+| **respx** | `>=0.21,<1` | Mock HTTP for gateway tests |
+
+### Other stack dependencies
+
+| Component | Notes |
+|-----------|--------|
+| **PostgreSQL** | Version in Docker is defined in `docker-compose.yml` (service image tag). |
+| **Python** | **3.11** for local tools and Dockerfiles (see [What you need installed](#what-you-need-installed)). |
 
 ---
 
