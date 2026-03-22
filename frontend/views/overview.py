@@ -12,6 +12,7 @@ import plotly.express as px
 import streamlit as st
 
 from frontend.api_client import fetch_json
+from frontend.query_params import build_query_params
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +24,7 @@ def render() -> None:
     Returns:
         None
     """
-    params = st.session_state.get("query_params") or {}
+    params = build_query_params()
     try:
         data = fetch_json("/metrics", params=params)
     except (httpx.HTTPError, httpx.RequestError) as exc:
@@ -53,6 +54,16 @@ def render() -> None:
     c2.metric("Sessions (events)", f"{_n('total_sessions'):,}")
     c3.metric("Events", f"{_n('total_events'):,}")
     c4.metric("Total tokens", f"{_n('total_tokens'):,}")
+
+    if _n("total_events") < 100 and not any(
+        af.get(k) for k in ("date_from", "date_to", "practice", "location")
+    ):
+        st.warning(
+            "The warehouse has almost no events (this is a **data** issue, not the UI). "
+            "Put `employees.csv` and `telemetry_logs.jsonl` in `data/raw/`, then run "
+            "`docker compose build && docker compose up -d` (seed loads automatically) "
+            "or `docker compose run --rm seed`."
+        )
 
     st.subheader("Token usage over time (daily)")
     by_day = data.get("usage_by_day") or []

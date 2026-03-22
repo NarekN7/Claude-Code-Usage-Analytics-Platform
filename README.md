@@ -1,6 +1,263 @@
 # Claude Code Usage Analytics Platform
 
-End-to-end analytics for synthetic Claude Code telemetry: **PostgreSQL** warehouse, **ETL** from JSONL/CSV, **FastAPI** microservices (gateway, ingestion, analytics), and a **Streamlit + Plotly** dashboard. Services talk **only over HTTP**; the UI never connects to the database directly.
+End-to-end analytics for Claude Code–style telemetry: **PostgreSQL** warehouse, **ETL** from JSONL/CSV, **FastAPI** microservices (gateway, ingestion, analytics), and a **Streamlit + Plotly** dashboard. The UI talks only to the **gateway** over HTTP; it never connects to the database directly.
+
+**Run the app:** [From clone to Streamlit (Docker)](#from-clone-to-streamlit-docker) · **Verify it:** [How to test that everything works](#how-to-test-that-everything-works)
+
+---
+
+## What you get
+
+| Piece | What it does |
+|-------|----------------|
+| **PostgreSQL** | Stores employees, events, sessions, ingestion checkpoints. |
+| **Ingestion API** (`:8001`) | Upload CSV/JSONL, ingest from server path, rebuild sessions. |
+| **Analytics API** (`:8002`) | Read-only metrics, filters, aggregates. |
+| **Gateway** (`:8000`) | Single public API: proxies to ingestion + analytics. |
+| **Streamlit** (`:8501`) | Four-page dashboard (Overview, User, Session, Event analytics). |
+| **Seed (one-shot)** | On startup, loads `data/raw/` into Postgres when the DB is empty or incomplete. |
+| **pgAdmin** (`:5050`, optional) | Web UI to inspect Postgres. |
+
+---
+
+## What you need installed
+
+| Tool | Why |
+|------|-----|
+| **Git** | Clone this repository. |
+| **Docker Desktop** (or Docker Engine + Compose v2) | Run the full stack with one command. |
+| **Python 3.11+** | Only for **generating** sample `employees.csv` + `telemetry_logs.jsonl` on your machine (Step 2 below). Docker images use Python 3.11 internally. |
+
+No Docker? See [Run without Docker (advanced)](#run-without-docker-advanced).
+
+---
+
+## From clone to Streamlit (Docker)
+
+Run every step in a terminal. Working directory must be the **repository root** (the folder that contains `docker-compose.yml`).
+
+### Step 0 — Clone the repository
+
+```bash
+git clone <YOUR_REPOSITORY_URL>
+cd Claude-Code-Usage-Analytics-Platform
+```
+
+Confirm you are in the right place:
+
+```bash
+ls docker-compose.yml README.md
+```
+
+---
+
+### Step 1 — Create sample data under `data/raw/`
+
+The stack expects **`data/raw/employees.csv`** and **`data/raw/telemetry_logs.jsonl`**. Generate them with the bundled script (requires Python 3.11+ on your host):
+
+```bash
+mkdir -p data/raw
+python3 claude_code_telemetry2/generate_fake_data.py --num-users 100 --num-sessions 2000 --days 60
+cp claude_code_telemetry2/output/employees.csv claude_code_telemetry2/output/telemetry_logs.jsonl data/raw/
+```
+
+**If you already have** compatible files, copy them into `data/raw/` instead of running the generator.
+
+---
+
+### Step 2 — Build images and start **all** services
+
+This starts **PostgreSQL**, **pgAdmin**, **ingestion**, **analytics**, **gateway**, runs **seed** once, then starts **Streamlit**.
+
+```bash
+docker compose up --build -d
+```
+
+First run builds images (may take a few minutes). Subsequent runs are faster.
+
+---
+
+### Step 3 — Wait until **seed** finishes
+
+Loading a large JSONL can take **about 1–2 minutes**. Streamlit will **not** start until `seed` exits successfully.
+
+```bash
+docker compose logs -f seed
+```
+
+Press **Ctrl+C** when you see log lines like `Seed complete` or the `seed` container stops. If `seed` fails, read the error in that log.
+
+---
+
+### Step 4 — Verify every microservice (health checks)
+
+Run these from your machine. Each should return JSON with `"status": "ok"` (gateway aggregates downstream services).
+
+```bash
+curl -s http://localhost:8000/health
+```
+
+```bash
+curl -s http://localhost:8001/health
+```
+
+```bash
+curl -s http://localhost:8002/health
+```
+
+Quick check that **analytics** has data (non‑tiny `total_events` after seed):
+
+```bash
+curl -s http://localhost:8000/metrics | python3 -c "import sys,json; print(json.load(sys.stdin)['totals'])"
+```
+
+Check Streamlit responds:
+
+```bash
+curl -s -o /dev/null -w "Streamlit HTTP %{http_code}\n" http://localhost:8501/
+```
+
+You should see `Streamlit HTTP 200`.
+
+---
+
+### Step 5 — Open the dashboard
+
+In a browser, open:
+
+**http://localhost:8501**
+
+Use the sidebar: filters (date, practice, location), API base caption, and four pages (Overview, User analytics, Session analytics, Event analytics).
+
+---
+
+### Step 6 — If KPIs look empty or stuck at “1 / 1 / 1”
+
+Re-run the loader (same logic as startup `seed`), then refresh the browser:
+
+```bash
+docker compose run --rm seed
+```
+
+If it still fails, confirm Step 1 files exist and you did **not** wipe the database with `docker compose down -v` unless you intend to reload from scratch.
+
+---
+
+### Step 7 — (Optional) pgAdmin
+
+| Field | Value |
+|-------|--------|
+| URL | http://localhost:5050 |
+| Email | `admin@example.com` |
+| Password | `admin` (from `docker-compose.yml`) |
+
+Register a server: host **`localhost`**, port **5432**, user **`analytics`**, password **`analytics`**, database **`analytics`**.
+
+---
+
+### Stop the stack
+
+```bash
+docker compose down
+```
+
+Keep your data: **do not** add `-v` unless you want to **delete** the Postgres volume.
+
+```bash
+docker compose down -v
+```
+
+---
+
+## Service reference (ports after `docker compose up`)
+
+| Service | Port | Role |
+|---------|------|------|
+| **Gateway** | 8000 | Public API for dashboard and operators. |
+| **Ingestion** | 8001 | CSV/JSONL ingest, session rebuild. |
+| **Analytics** | 8002 | Metrics and aggregates. |
+| **Streamlit** | 8501 | Interactive dashboard. |
+| **PostgreSQL** | 5432 | Database (`analytics` / `analytics`). |
+| **pgAdmin** | 5050 | DB admin UI (optional). |
+
+---
+
+## Run without Docker (advanced)
+
+Use when you cannot run Docker but have PostgreSQL locally. You need **five terminals** from the repo root.
+
+### 1) Install Python deps and apply migrations
+
+```bash
+pip install -r requirements.txt
+export PYTHONPATH=$(pwd)
+alembic upgrade head
+```
+
+Set `DATABASE_URL` if Postgres is not the default in `backend/common/config.py`.
+
+### 2) Start each API (three terminals)
+
+```bash
+uvicorn backend.gateway.main:app --host 0.0.0.0 --port 8000
+```
+
+```bash
+uvicorn backend.ingestion.main:app --host 0.0.0.0 --port 8001
+```
+
+```bash
+uvicorn backend.analytics.main:app --host 0.0.0.0 --port 8002
+```
+
+### 3) Start Streamlit (fourth terminal)
+
+```bash
+export PUBLIC_GATEWAY_URL=http://localhost:8000
+streamlit run frontend/streamlit_app.py --server.port 8501
+```
+
+### 4) Load data
+
+With APIs running, either:
+
+```bash
+export PYTHONPATH=$(pwd)
+python -m scripts.etl.run_pipeline
+```
+
+(uses defaults under `data/raw/` when files exist), **or** use the **Manual ingest** commands in [Manual ingest via `curl`](#manual-ingest-via-curl).
+
+---
+
+## Manual ingest via `curl`
+
+Use when `seed` did not run or you need to reload. Put files under `data/raw/` on the host (Compose mounts them at `/app/data/raw/` in the **ingestion** container).
+
+**Gateway (8000)** — good for CSV and multipart JSONL:
+
+```bash
+curl -s -X POST "http://localhost:8000/ingest/employees/csv" -F "file=@data/raw/employees.csv"
+curl -s -X POST "http://localhost:8000/ingest/telemetry/jsonl" -F "file=@data/raw/telemetry_logs.jsonl"
+curl -s -X POST "http://localhost:8000/process/sessions"
+```
+
+**Ingestion (8001)** — use **path ingest** for large JSONL (no multi‑hundred‑MB upload through `curl`):
+
+```bash
+curl -s -X POST "http://localhost:8001/ingest/employees/csv" -F "file=@data/raw/employees.csv"
+curl -s -X POST "http://localhost:8001/ingest/telemetry/jsonl/path?path=/app/data/raw/telemetry_logs.jsonl"
+curl -s -X POST "http://localhost:8001/process/sessions"
+```
+
+Or multipart only on **8001**:
+
+```bash
+curl -s -X POST "http://localhost:8001/ingest/telemetry/jsonl" -F "file=@data/raw/telemetry_logs.jsonl"
+curl -s -X POST "http://localhost:8001/process/sessions"
+```
+
+---
 
 ## Architecture
 
@@ -25,110 +282,34 @@ End-to-end analytics for synthetic Claude Code telemetry: **PostgreSQL** warehou
 
 | Layer | Location | Role |
 |-------|----------|------|
-| Data | `data/raw/` | Place `telemetry_logs.jsonl` and `employees.csv` here (or mount in Docker). |
-| DB | `db/` | SQLAlchemy models, Alembic migrations, session helpers. |
-| ETL | `scripts/etl/` | Parse JSONL (CloudWatch + alternate envelopes), load employees/events, sessionize. Used by CLI **and** ingestion API. |
-| Backend | `backend/gateway/`, `backend/ingestion/`, `backend/analytics/` | Gateway proxies to ingestion + analytics; Pydantic validation on ingest. |
-| Frontend | `frontend/streamlit_app.py` | Four pages: Overview, User, Session, Event analytics via gateway. |
-| Assignment alias | `app/streamlit_app.py` | Thin shim to `frontend/streamlit_app.py`. |
+| Data | `data/raw/` | `telemetry_logs.jsonl`, `employees.csv` (not committed if large; see `.gitignore`). |
+| DB | `db/` | SQLAlchemy models, Alembic migrations. |
+| ETL | `scripts/etl/` | JSONL parsing, loaders, sessionization; used by CLI and ingestion API. |
+| Backend | `backend/` | Gateway, ingestion, analytics, shared config. |
+| Frontend | `frontend/streamlit_app.py` | Dashboard entry. |
+| Alias | `app/streamlit_app.py` | Shim to `frontend/streamlit_app.py`. |
 
-## Prerequisites
-
-- Python **3.11** (required for type syntax and dependencies; use `python3.11 -m venv .venv` locally)
-- **Docker** + Docker Compose (recommended; the `Dockerfile` uses `python:3.11-slim`)
-- Optional: local **PostgreSQL** if not using Compose
-
-## Generate sample data
-
-From the repo root:
-
-```bash
-python3 claude_code_telemetry2/generate_fake_data.py --num-users 100 --num-sessions 2000 --days 60
-```
-
-Copy outputs into the raw data folder:
-
-```bash
-mkdir -p data/raw
-cp claude_code_telemetry2/output/employees.csv claude_code_telemetry2/output/telemetry_logs.jsonl data/raw/
-```
+---
 
 ## Configuration
 
-Copy `.env.example` to `.env` and adjust. Important variables:
+Copy `.env.example` to `.env` if you need overrides.
 
 | Variable | Purpose |
 |----------|---------|
-| `DATABASE_URL` | SQLAlchemy URL for PostgreSQL (ingestion + analytics). |
-| `PUBLIC_GATEWAY_URL` | Base URL the Streamlit app uses (e.g. `http://localhost:8000` or `http://gateway:8000` in Compose). |
-| `INGESTION_BASE_URL` / `ANALYTICS_BASE_URL` | Used by the gateway to reach backend services. |
-| `DATA_RAW_DIR` | Default directory for the ETL CLI. |
+| `DATABASE_URL` | PostgreSQL URL for services and Alembic. |
+| `PUBLIC_GATEWAY_URL` | Base URL Streamlit uses (`http://localhost:8000` locally, `http://gateway:8000` in Compose). |
+| `INGESTION_BASE_URL` / `ANALYTICS_BASE_URL` | Gateway → backends. |
 
-Set `PYTHONPATH` to the repository root for local runs:
+Local Python tools:
 
 ```bash
 export PYTHONPATH=$(pwd)
 ```
 
-## Run with Docker Compose
+---
 
-Build and start **postgres**, **pgadmin**, **ingestion**, **analytics**, **gateway**, and **dashboard**:
-
-```bash
-docker compose up --build
-```
-
-| Service | URL / port |
-|---------|------------|
-| API gateway | http://localhost:8000 |
-| Ingestion API | http://localhost:8001 |
-| Analytics API | http://localhost:8002 |
-| Streamlit | http://localhost:8501 |
-| PostgreSQL | localhost:5432 (`analytics` / `analytics`) |
-| pgAdmin | http://localhost:5050 (see compose env for default email/password) |
-
-**Automatic load (recommended):** place `employees.csv` and `telemetry_logs.jsonl` under `./data/raw/` before starting Compose. The one-shot **`seed`** service waits for ingestion, then loads employees + telemetry (path ingest) + session rebuild when the database is empty or has too few events while a large JSONL file is mounted (it repairs “stale” dev DBs). **Streamlit** starts only after `seed` exits successfully.
-
-If `data/raw/` is missing those files, seed skips and the warehouse stays empty until you load manually:
-
-After containers are up, you can load data manually (from your host, with files under `./data/raw`):
-
-```bash
-curl -s -X POST "http://localhost:8001/ingest/employees/csv" -F "file=@data/raw/employees.csv"
-curl -s -X POST "http://localhost:8001/ingest/telemetry/jsonl" -F "file=@data/raw/telemetry_logs.jsonl"
-curl -s -X POST "http://localhost:8001/process/sessions"
-```
-
-Or use the gateway (multipart is forwarded correctly):
-
-```bash
-curl -s -X POST "http://localhost:8000/ingest/employees/csv" -F "file=@data/raw/employees.csv"
-curl -s -X POST "http://localhost:8000/ingest/telemetry/jsonl" -F "file=@data/raw/telemetry_logs.jsonl"
-curl -s -X POST "http://localhost:8000/process/sessions"
-```
-
-Open the dashboard at **http://localhost:8501**. Optional filters: date range (UTC), practice, location.
-
-### pgAdmin
-
-Add a server: host `postgres` (from your machine use `localhost` if port-forwarded), user `analytics`, password `analytics`, database `analytics`.
-
-## Run locally (without Docker)
-
-1. Start PostgreSQL and create database `analytics` (or set `DATABASE_URL`).
-2. Install dependencies: `pip install -r requirements.txt`
-3. `export PYTHONPATH=$(pwd)`
-4. Migrate: `alembic upgrade head`
-5. Terminal A — gateway: `uvicorn backend.gateway.main:app --port 8000`
-6. Terminal B — ingestion: `uvicorn backend.ingestion.main:app --port 8001`
-7. Terminal C — analytics: `uvicorn backend.analytics.main:app --port 8002`
-8. Terminal D — UI: `streamlit run frontend/streamlit_app.py --server.port 8501`
-
-Set `PUBLIC_GATEWAY_URL=http://localhost:8000` for Streamlit.
-
-## ETL CLI (batch pipeline)
-
-Runs the same loaders as the ingestion service:
+## ETL CLI (same loaders as the ingestion API)
 
 ```bash
 export PYTHONPATH=$(pwd)
@@ -137,56 +318,120 @@ python -m scripts.etl.run_pipeline
 
 Options: `--employees PATH`, `--jsonl PATH`, `--skip-employees`, `--skip-events`, `--skip-sessions`.
 
-## Testing
+---
 
-Install dev dependencies and run the suite (unit tests + mocked gateway; **no PostgreSQL** required for the default run):
+## API (via gateway on port 8000)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/health` | Gateway + downstream liveness. |
+| GET | `/metrics` | KPIs + breakdowns (`date_from`, `date_to`, `practice`, `location`). |
+| GET | `/users` | User-centric aggregates. |
+| GET | `/sessions` | Session duration + sessions per day. |
+| GET | `/events/summary` | Event types + model distribution. |
+| POST | `/ingest/employees/csv` | Multipart CSV. |
+| POST | `/ingest/telemetry/jsonl` | Multipart JSONL. |
+| POST | `/process/sessions` | Rebuild `sessions` from `events`. |
+
+Ingestion-only routes (e.g. `/ingest/telemetry/jsonl/path`) are available on **:8001**; the gateway forwards `/ingest/*` when proxied accordingly.
+
+---
+
+## How to test that everything works
+
+Use **automated tests** for CI-style checks, then **manual smoke tests** when the Docker stack is up. All commands below assume the **repository root** and (for Python) **`PYTHONPATH`**.
+
+### A) Install test dependencies
 
 ```bash
 pip install -r requirements-dev.txt
 export PYTHONPATH=$(pwd)
-pytest tests -v
 ```
 
-- **Fast only** (skip DB integration): `pytest tests -v -m "not integration"`
-- **PostgreSQL integration** (`tests/test_integration_postgres.py`): start Postgres, set `DATABASE_URL` or `TEST_DATABASE_URL`, then run `pytest tests/test_integration_postgres.py -v` or full `pytest tests -v`.
+---
 
-Example with Docker Compose:
+### B) Fast automated tests (no PostgreSQL, no Docker)
+
+Runs unit tests, parsers, schemas, mocked gateway, and in-process health checks — **no live database**.
+
+```bash
+pytest tests -v -m "not integration"
+```
+
+Expect **all tests passed** (the suite skips integration tests).
+
+---
+
+### C) Full automated tests (includes PostgreSQL integration)
+
+Integration tests live in `tests/test_integration_postgres.py` and need a **reachable Postgres** with the same schema (Alembic migrations applied).
+
+**Option 1 — Postgres already running (e.g. Docker Compose):**
 
 ```bash
 docker compose up -d postgres
+```
+
+Wait until Postgres is healthy, then:
+
+```bash
+export DATABASE_URL=postgresql+psycopg2://analytics:analytics@127.0.0.1:5432/analytics
+pytest tests -v
+```
+
+**Option 2 — only integration file:**
+
+```bash
 export DATABASE_URL=postgresql+psycopg2://analytics:analytics@127.0.0.1:5432/analytics
 pytest tests/test_integration_postgres.py -v
 ```
 
-What is covered:
+You can use `TEST_DATABASE_URL` instead of `DATABASE_URL` if you prefer a dedicated test database.
 
-| Area | Tests |
+**Important:** Do **not** point `DATABASE_URL` at the same database while you are **also** using the full app and expecting seeded data — integration tests **truncate** tables. Use a separate DB, or run integration tests **before** loading production-like data, or stop the stack first.
+
+---
+
+### D) What the test suite covers
+
+| Area | Files |
 |------|--------|
-| ETL parse / Pydantic | `test_parse.py`, `test_schemas.py` |
-| `/health` | `test_health_endpoints.py` (analytics, ingestion) |
-| Gateway → downstream | `test_gateway_respx.py` (mocked `httpx`: `/health`, `/metrics`, `/users`, `/sessions`, `/events/summary`, ingest, process) |
-| DB + APIs | `test_integration_postgres.py` (requires live Postgres: metrics, users/sessions/summary, sessionization, CSV + JSONL ingest) |
+| JSONL parse / Pydantic | `test_parse.py`, `test_schemas.py` |
+| `/health` on ingestion & analytics | `test_health_endpoints.py` |
+| Gateway → downstream (mocked HTTP) | `test_gateway_respx.py` |
+| Postgres + ingest + metrics + sessionization | `test_integration_postgres.py` (needs live DB) |
 
-## API (via gateway)
+---
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/metrics` | Full KPI + breakdown payload (filters: `date_from`, `date_to`, `practice`, `location`). |
-| GET | `/users` | User-centric aggregates. |
-| GET | `/sessions` | Session duration buckets + sessions per day. |
-| GET | `/events/summary` | Event types + model distribution. |
-| POST | `/ingest/employees/csv` | Multipart CSV upload. |
-| POST | `/ingest/telemetry/jsonl` | Multipart JSONL upload. |
-| POST | `/process/sessions` | Rebuild `sessions` from `events`. |
+### E) Manual smoke test (full Docker stack)
 
-## Git workflow (branch-per-epoch)
+After **Steps 2–4** in [From clone to Streamlit (Docker)](#from-clone-to-streamlit-docker) (stack is up and health checks pass), confirm:
 
-Use short-lived branches per milestone (e.g. `epoch/1-db`, `epoch/2-etl`, `epoch/3-backend`, `epoch/4-frontend`, `epoch/5-docker`), merge to `main` after checks, and keep commits small and traceable.
+| Check | Command or action |
+|-------|-------------------|
+| Gateway health | `curl -s http://localhost:8000/health` — `ingestion` and `analytics` should be `"ok"`. |
+| Ingestion health | `curl -s http://localhost:8001/health` |
+| Analytics health | `curl -s http://localhost:8002/health` |
+| Metrics payload | `curl -s http://localhost:8000/metrics \| python3 -c "import sys,json; print(json.load(sys.stdin)['totals'])"` — expect non‑tiny `total_events` after seed. |
+| Streamlit | Open http://localhost:8501 — four pages load; KPIs and charts populate (no filters excluding all data). |
+| Optional | `curl -s "http://localhost:8000/users?limit=3"` and similar for `/sessions`, `/events/summary`. |
+
+If any step fails, follow **Step 6** in the same section (re-run `seed`) and inspect `docker compose logs` for `gateway`, `ingestion`, `analytics`, `seed`, `dashboard`.
+
+---
+
+## Git workflow (optional)
+
+Short-lived feature branches, merge to `main` after checks; keep commits small and traceable.
+
+---
 
 ## Coding standards
 
-Python code follows [CODING_GUIDELINES.md](CODING_GUIDELINES.md) (docstrings, logging before raises, typed exceptions).
+See [CODING_GUIDELINES.md](CODING_GUIDELINES.md).
+
+---
 
 ## License
 
-See [LICENSE](LICENSE) in the repository.
+See [LICENSE](LICENSE).

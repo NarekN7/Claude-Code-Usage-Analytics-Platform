@@ -12,9 +12,12 @@ from sqlalchemy.orm import Session
 logger = logging.getLogger(__name__)
 
 
-SESSION_INSERT_SQL = """
-DELETE FROM sessions;
+# Run DELETE and INSERT as separate executes. Some DBAPI/SQLAlchemy paths do not run
+# every statement in a single multi-statement text() batch reliably, which can leave
+# sessions empty after DELETE only.
+SESSION_DELETE_SQL = "DELETE FROM sessions"
 
+SESSION_INSERT_SQL = """
 INSERT INTO sessions (
     session_id,
     user_email,
@@ -65,6 +68,7 @@ def rebuild_sessions(session: Session) -> int:
     Raises:
         sqlalchemy.exc.SQLAlchemyError: On database errors.
     """
+    session.execute(text(SESSION_DELETE_SQL))
     session.execute(text(SESSION_INSERT_SQL))
     result = session.execute(text("SELECT COUNT(*) FROM sessions"))
     row = result.scalar_one()

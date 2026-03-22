@@ -12,6 +12,7 @@ import plotly.express as px
 import streamlit as st
 
 from frontend.api_client import fetch_json
+from frontend.query_params import build_query_params
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +24,7 @@ def render() -> None:
     Returns:
         None
     """
-    params = st.session_state.get("query_params") or {}
+    params = build_query_params()
     try:
         data = fetch_json("/sessions", params=params)
     except (httpx.HTTPError, httpx.RequestError) as exc:

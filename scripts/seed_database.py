@@ -9,6 +9,7 @@ Controlled by env:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sys
@@ -58,6 +59,14 @@ def _event_count() -> int:
     engine = create_engine(_database_url(), pool_pre_ping=True)
     with engine.connect() as conn:
         row = conn.execute(text("SELECT COUNT(*) FROM events")).one()
+    engine.dispose()
+    return int(row[0])
+
+
+def _sessions_count() -> int:
+    engine = create_engine(_database_url(), pool_pre_ping=True)
+    with engine.connect() as conn:
+        row = conn.execute(text("SELECT COUNT(*) FROM sessions")).one()
     engine.dispose()
     return int(row[0])
 
@@ -139,9 +148,37 @@ def _ingest_telemetry_path(client: httpx.Client, jsonl_path: Path) -> None:
 
 def _rebuild_sessions(client: httpx.Client) -> None:
     url = f"{_ingestion_url()}/process/sessions"
-    r = client.post(url, timeout=httpx.Timeout(600.0))
-    r.raise_for_status()
-    logger.info("Session rebuild: %s", r.text)
+    attempts = int(os.environ.get("SEED_SESSION_REBUILD_ATTEMPTS", "5"))
+    pause_s = float(os.environ.get("SEED_SESSION_REBUILD_PAUSE_S", "2.0"))
+    for attempt in range(1, attempts + 1):
+        r = client.post(url, timeout=httpx.Timeout(600.0))
+        r.raise_for_status()
+        try:
+            body = r.json()
+            rebuilt = int(body.get("sessions_rebuilt", 0))
+        except (json.JSONDecodeError, TypeError, ValueError):
+            rebuilt = 0
+        sess = _sessions_count()
+        logger.info(
+            "Session rebuild attempt %s/%s: sessions_rebuilt=%s rows_in_db=%s body=%s",
+            attempt,
+            attempts,
+            rebuilt,
+            sess,
+            r.text[:500],
+        )
+        events_n = _event_count()
+        if events_n == 0:
+            return
+        if rebuilt > 0 or sess > 0:
+            return
+        if attempt < attempts:
+            time.sleep(pause_s)
+    if _event_count() > 0 and _sessions_count() == 0:
+        logger.error(
+            "Sessions table is still empty after %s rebuild attempts — check ingestion / sessionization.",
+            attempts,
+        )
 
 
 def main() -> None:
